@@ -1,0 +1,18 @@
+#!/bin/sh -fu
+
+cwd="$(readlink -ev "$0")"
+cwd="${0%/*}"
+
+. "$cwd/charon-sh-config"
+. "$cwd/charon-sh-functions"
+
+[ -f "$GITHUB_TOKEN" ] ||
+	fatal "github token required"
+
+github_api_get "$1"
+
+printf '=== HEADERS ===\n'
+cat "$TEMPDIR/github-headers"
+
+printf '=== BODY ===\n'
+cat "$TEMPDIR/github-body"

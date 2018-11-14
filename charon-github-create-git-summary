@@ -1,0 +1,25 @@
+#!/bin/sh -efu
+
+. gear-sh-functions
+
+name="$1"; shift
+
+export LANG=C
+export GIT_DIR="$1"
+
+workdir="${TEMPDIR:-/tmp}"
+main_tree_id='HEAD'
+
+find_specfile
+
+rpmquery \
+	--qf='%{name}\t%{summary}\n' \
+	--specfile "$workdir/specfile" 2>/dev/null |
+while IFS='	' read -r pkg summary; do
+	[ "$pkg" != "$name" ] ||
+		printf '%s\n' "$summary"
+done
+
+rm -f -- \
+	"$workdir/rules" \
+	"$workdir/specfile"

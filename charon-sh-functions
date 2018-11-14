@@ -1,0 +1,10 @@
+#!/bin/sh
+
+. shell-error
+
+log()
+{
+	printf '%s] %s ' "$(date +'%Y-%m-%d %H:%M:%S.%N')" "$PROG"
+	printf -- "$@"
+	printf '\n'
+}

@@ -1,0 +1,179 @@
+#!/bin/sh -fu
+
+cwd="$(readlink -ev "$0")"
+cwd="${0%/*}"
+
+. "$cwd/charon-sh-config"
+. "$cwd/charon-sh-functions"
+
+github_http_status()
+{
+	sed -n \
+		-e '1,1{ s,HTTP/[^[:space:]]\+ \([0-9]\+\) .*,\1,p }' \
+		"$TEMPDIR/github-headers"
+}
+
+github_api_get()
+{
+	github_status=
+	curl -s \
+		-H "@$GITHUB_TOKEN" \
+		-H 'Accept: application/vnd.github.v3+json' \
+		-X GET \
+		-D "$TEMPDIR/github-headers" \
+		-o "$TEMPDIR/github-body" \
+		"$GITHUB_URL$1"
+
+	github_http_status
+}
+
+__github_api_method()
+{
+	curl -s \
+		-H "@$GITHUB_TOKEN" \
+		-H 'Accept: application/vnd.github.v3+json' \
+		-H 'Accept: application/vnd.github.mercy-preview+json' \
+		-X "$1" \
+		-d "@-" \
+		-D "$TEMPDIR/github-headers" \
+		-o "$TEMPDIR/github-body" \
+		"$GITHUB_URL$2"
+
+	github_http_status
+}
+
+
+github_api_post()
+{
+	__github_api_method POST "$1"
+}
+
+github_api_put()
+{
+	__github_api_method PUT "$1"
+}
+
+github_error()
+{
+	printf 'GITHUB HTTP error: status=%s\n' "$status"
+	printf 'URL: %s\n' "$1"
+	cat "$TEMPDIR/github-body"
+}
+
+# https://developer.github.com/v3/#rate-limiting
+# https://developer.github.com/v3/rate_limit/
+github_rate_limit()
+{
+	local status
+
+	status="$(github_api_get /rate_limit)"
+	if [ "$status" != 200 ]; then
+		github_error '/rate_limit'
+		exit 1
+	fi
+
+	limit_remaining="$(jq .resources.core.remaining "$TEMPDIR/github-body")"
+	limit_reset="$(jq .resources.core.reset "$TEMPDIR/github-body")"
+}
+
+if [ ! -f "$GITHUB_TOKEN" ]; then
+	log "GITHUB token required"
+	exit 1
+fi
+
+MANIFEST="$1"; shift
+
+sort -u -o "$DATADIR/github-created" "$DATADIR/github-created"
+
+if [ -f "$DATADIR/whitelist" ]; then
+	log 'use whitelist'
+	sort -u -o "$DATADIR/whitelist" "$DATADIR/whitelist"
+	sort -u -k1,1 "$MANIFEST" |
+		join -t '	' -j1 -a1 "$DATADIR/whitelist" - > "$TEMPDIR/$PROG.repos"
+else
+	sort -u -k1,1 "$MANIFEST" > "$TEMPDIR/$PROG.repos"
+fi
+
+join -t '	' -j1 -v2 "$DATADIR/github-created" "$TEMPDIR/$PROG.repos" > "$TEMPDIR/$PROG.repos-not-created"
+
+if [ ! -s "$TEMPDIR/$PROG.repos-not-created" ]; then
+	log 'nothing to do'
+	exit 0
+fi
+
+log 'need to create %s repositories' "$(wc -l < "$TEMPDIR/$PROG.repos-not-created")"
+
+github_rate_limit
+
+rc=0
+while IFS='	' read -r repo _ _ gitdir; do
+	while [ "$limit_remaining" -le 0 ]; do
+		log 'GITHUB rate limit reached. The time at which the current rate limit window resets in %s' "$(date -u --date="@$limit_reset")"
+
+		now=$(date -u '+%s')
+
+		while [ "$now" -le "$limit_reset" ]; do
+			sleep 30
+			now=$(date -u '+%s')
+		done
+
+		github_rate_limit
+
+		log 'new GITHUB rate limit %s requests' "$limit_remaining"
+		log 'new GITHUB rate limit window resets in %s' "$(date -u --date="@$limit_reset")"
+	done
+
+	name="${repo%.git}"
+
+	log 'creating %s GITHUB repository' "$name"
+
+	summary="$("$0-git-summary" "$name" "$gitdir" |sed -e "s/\"/'/g")"
+
+	url="/orgs/altlinux-packages/repos"
+	status=$(github_api_post "$url" <<-EOF
+		{
+		    "name": "$name",
+		    "description": "$summary",
+		    "homepage": "https://packages.altlinux.org/en/Sisyphus/srpms/$name",
+		    "private": false,
+		    "has_issues": false,
+		    "has_projects": false,
+		    "has_wiki": false,
+		    "allow_squash_merge": false,
+		    "allow_rebase_merge": false
+		}
+		EOF
+	)
+
+	limit_remaining=$(($limit_remaining - 1))
+
+	if [ "$status" != 201 ]; then
+		github_error "$url"
+		rc=1
+		continue
+	fi
+
+	printf '%s\n' "$repo" >>"$DATADIR/github-created"
+
+	url="/repos/altlinux-packages/$name/topics"
+	status=$(github_api_put "$url" <<-EOF
+		{
+		    "names": [
+		        "altlinux",
+		        "package",
+		        "rpm"
+		    ]
+		}
+		EOF
+	)
+
+	limit_remaining=$(($limit_remaining - 1))
+
+	if [ "$status" != 200 ]; then
+		github_error "$url"
+		rc=1
+	fi
+
+done < "$TEMPDIR/$PROG.repos-not-created"
+
+exit $rc

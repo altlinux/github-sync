@@ -1,0 +1,36 @@
+#!/bin/sh -efu
+
+. shell-error
+. shell-signal
+
+cwd="$(readlink -ev "$0")"
+cwd="${0%/*}"
+
+. "$cwd/charon-sh-config"
+. "$cwd/charon-sh-functions"
+
+[ -f "$old_state" ] || :> "$old_state"
+[ -f "$cur_state" ] || :> "$cur_state"
+
+log "update state"
+
+find \
+	"$ARCHIVEDIR/srpms" \
+	-mindepth 2 -maxdepth 2 -type d -name '*.git' \
+	-printf '%f\t%T+\t1\t%p\n' > "$TEMPDIR/state.srpms" &
+
+find \
+	"$ARCHIVEDIR/gears" \
+	-mindepth 2 -maxdepth 2 -type d -name '*.git' \
+	-printf '%f\t%T+\t2\t%p\n' > "$TEMPDIR/state.gears" &
+
+wait
+
+sort -k1,3 -r \
+	-o "$cur_state" \
+	"$TEMPDIR/state.gears" \
+	"$TEMPDIR/state.srpms"
+
+find "$STATEDIR" -type f -name 'state' -exec cat '{}' '+' |
+	sort -k1,3 -r \
+	-o "$old_state"
