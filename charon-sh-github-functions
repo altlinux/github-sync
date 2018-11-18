@@ -1,0 +1,79 @@
+#!/bin/sh -efu
+
+github_http_status()
+{
+	sed -n \
+		-e '1,1{ s,HTTP/[^[:space:]]\+ \([0-9]\+\) .*,\1,p }' \
+		"$TEMPDIR/github-headers"
+}
+
+github_limit_remaining()
+{
+	local limit_remaining
+	limit_remaining=$(
+		sed -n -r \
+			-e 's/^X-RateLimit-Remaining:[[:space:]]+([0-9]+).*/\1/p' \
+			"$TEMPDIR/github-headers"
+	)
+	printf '%s\n' "${limit_remaining:-0}"
+}
+
+__github_api_method()
+{
+	curl -s \
+		-H "@$GITHUB_TOKEN" \
+		-H 'Accept: application/vnd.github.v3+json' \
+		-H 'Accept: application/vnd.github.mercy-preview+json' \
+		-X "$1" \
+		-d "@-" \
+		-D "$TEMPDIR/github-headers" \
+		-o "$TEMPDIR/github-body" \
+		"$GITHUB_URL$2"
+
+	github_http_status
+}
+
+
+github_api_post()
+{
+	__github_api_method POST "$1"
+}
+
+github_api_put()
+{
+	__github_api_method PUT "$1"
+}
+
+github_api_get()
+{
+	__github_api_method GET "$1" </dev/null
+}
+
+github_api_delete()
+{
+	__github_api_method DELETE "$1" </dev/null
+}
+
+github_error()
+{
+	printf 'GITHUB URL: %s (method=%s)\n' "$1" "$2"
+	cat "$TEMPDIR/github-headers"
+	printf '---\n'
+	cat "$TEMPDIR/github-body"
+}
+
+# https://developer.github.com/v3/#rate-limiting
+# https://developer.github.com/v3/rate_limit/
+github_rate_limit()
+{
+	local status
+
+	status="$(github_api_get /rate_limit)"
+	if [ "$status" != 200 ]; then
+		github_error '/rate_limit' "GET"
+		exit 1
+	fi
+
+	limit_remaining="$(jq .resources.core.remaining "$TEMPDIR/github-body")"
+	limit_reset="$(jq .resources.core.reset "$TEMPDIR/github-body")"
+}

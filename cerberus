@@ -1,0 +1,170 @@
+#!/bin/sh -efu
+
+. shell-error
+. shell-signal
+
+cwd="$(readlink -ev "$0")"
+cwd="${0%/*}"
+
+. "$cwd/charon-sh-config"
+. "$cwd/charon-sh-functions"
+. "$cwd/charon-sh-github-functions"
+
+workdir=
+exit_handler()
+{
+	#return
+	[ -z "$workdir" ] || rm -rf -- "$workdir"
+}
+
+[ -f "$GITHUB_TOKEN" ] ||
+	fatal "github token required"
+
+newcomers="$1"; shift
+
+[ -s "$cerberus_rules" ] ||
+	exit 0
+
+workdir="$(mktemp -d "$TEMPDIR/$PROG.XXXXXXXXX")"
+set_cleanup_handler exit_handler
+
+log 'newcomers %s' "$(wc -l < "$newcomers")"
+
+log 'uses rules'
+sed -r -f "$cerberus_rules" "$newcomers" > "$workdir/newcomers"
+
+diff \
+	--new-line-format='' \
+	--old-line-format='%l
+' \
+	--unchanged-line-format='' \
+	-- \
+		"$newcomers" \
+		"$workdir/newcomers" |
+while read -r repo state; do
+	repo_statedir "statedir" "$repo"
+	mkdir -p -- "$statedir"
+	printf '%s\t%s\n' "$repo" "$state" > "$statedir/state"
+done
+
+limit_newcomers="${LIMIT_NEWCOMERS:-}"
+
+:> "$workdir/newcomers.with-head"
+:> "$workdir/newcomers.without-head"
+
+log 'is looking for headless newcomers'
+while read -r repo state; do
+	suffix="${repo#?}"
+	prefix="${repo%$suffix}"
+
+	for repotype in gears srpms; do
+		gitdir="$ARCHIVEDIR/$repotype/$prefix/$repo"
+
+		[ -d "$gitdir" ] ||
+			continue
+
+		git --git-dir="$gitdir" rev-parse --symbolic-full-name --branches='*' |
+		while read -r head; do
+			if is_valid_head "$head"; then
+				printf 'yes\n'
+				break
+			fi
+		done
+	done > "$workdir/has-head"
+
+	if [ -s "$workdir/has-head" ]; then
+		printf '%s\t%s\n' "$repo" "$state" >> "$workdir/newcomers.with-head"
+
+		if [ -n "$limit_newcomers" ]; then
+			limit_newcomers=$(($limit_newcomers - 1))
+
+			[ "$limit_newcomers" != 0 ] ||
+				break
+		fi
+	else
+		repo_statedir "statedir" "$repo"
+		mkdir -p -- "$statedir"
+		printf '%s\t%s\n' "$repo" "$state" > "$statedir/state"
+
+		printf '%s\n' "$repo" >> "$workdir/newcomers.without-head"
+	fi
+
+done < "$workdir/newcomers"
+
+cp -f -- "$workdir/newcomers.with-head" "$newcomers"
+
+log 'is looking for those who can be kicked out'
+grep -Fxf "$workdir/newcomers.without-head" "$DATADIR/github-created" > "$workdir/repos-to-delete" ||:
+
+log 'is looking for name collisions'
+cut -f1 "$newcomers" | grep    -Fxf - "$DATADIR/github-created" > "$workdir/newcomers.case"  ||:
+cut -f1 "$newcomers" | grep -i -Fxf - "$DATADIR/github-created" > "$workdir/newcomers.icase" ||:
+
+diff \
+	--new-line-format='%l
+' \
+	--old-line-format='' \
+	--unchanged-line-format='' \
+	-- \
+	"$workdir/newcomers.case" \
+	"$workdir/newcomers.icase" >> "$workdir/repos-to-delete" ||:
+
+rc=0
+if [ ! -s "$workdir/repos-to-delete" ]; then
+	log 'has nothing to remove from GITHUB'
+	exit $rc
+fi
+
+log 'is going to remove %s repositories' "$(wc -l < "$workdir/repos-to-delete")"
+:> "$workdir/removed"
+
+github_rate_limit
+
+while read -r repo; do
+	while [ "$limit_remaining" -le 0 ]; do
+		log 'reached a GITHUB rate limit. The time at which the current rate limit window resets in %s' "$(date -u --date="@$limit_reset")"
+
+		now=$(date -u '+%s')
+
+		while [ "$now" -le "$limit_reset" ]; do
+			sleep 30
+			now=$(date -u '+%s')
+		done
+
+		github_rate_limit
+
+		log 'has new GITHUB rate limit %s requests' "$limit_remaining"
+		log 'has new GITHUB rate limit window resets in %s' "$(date -u --date="@$limit_reset")"
+	done
+
+	name="${repo%.git}"
+	github_reponame github_name "$name"
+
+	info=
+	[ "$github_name" = "$name" ] ||
+		info=" (as $github_name)"
+
+	log 'removing %s GITHUB repository' "$name$info"
+
+	url="/repos/$GITHUB_ORG/$github_name"
+	status=$(github_api_delete "$url")
+	limit_remaining=$(github_limit_remaining)
+
+	if [ "$status" != 204 ] && [ "$status" != 404 ]; then
+		github_error "$url" "DELETE"
+		rc=1
+		continue
+	fi
+
+	printf '%s\n' "$repo" >> "$workdir/removed"
+
+done < "$workdir/repos-to-delete"
+
+if [ -s "$workdir/removed" ]; then
+	grep -Fxvf "$workdir/removed" "$DATADIR/github-created" > "$workdir/github-created"
+	mv -f -- \
+		"$workdir/github-created" \
+		"$DATADIR/github-created"
+fi
+
+exit $rc

@@ -1,0 +1,211 @@
+#!/bin/sh -efu
+
+. shell-error
+. shell-signal
+
+TEST=
+
+cwd="$(readlink -ev "$0")"
+cwd="${0%/*}"
+
+. "$cwd/charon-sh-config"
+. "$cwd/charon-sh-functions"
+
+NUM="$1"; shift
+REPO="$1"; shift
+
+reponame="${REPO%.git}"
+suffix="${REPO#?}"
+prefix="${REPO%$suffix}"
+
+github_reponame github_name "$REPO"
+
+remote="git@github.com:$GITHUB_ORG/$github_name"
+
+workdir=
+exit_handler()
+{
+	#return
+	[ -z "$workdir" ] || rm -rf -- "$workdir"
+}
+
+git_push()
+{
+	local rc=0
+
+	local dir="$1"; shift
+	local src="$1"; shift
+	local dst="$1"; shift
+
+	$TEST git --git-dir="$dir" push -q "$remote" "$src:$dst" >"$workdir/git-push.output" 2>&1 || rc=$?
+	if [ "$rc" != 0 ]; then
+		if grep -qs -e 'remote: error: ' "$workdir/git-push.output"; then
+			{
+				printf '\n'
+				sed -n -e 's/^remote: /# &/p' "$workdir/git-push.output"
+				printf '/^%s\.git[[:space:]]/d\n' "$reponame"
+			} >> "$cerberus_rules"
+		fi
+		cat "$workdir/git-push.output"
+	fi
+	return $rc
+}
+
+workdir="$(mktemp -d "$TEMPDIR/$PROG.XXXXXXXXX")"
+set_cleanup_handler exit_handler
+
+remote_heads="$workdir/remote.heads"
+remote_tags="$workdir/remote.tags"
+
+if [ ! -e "$remote_heads"  ]; then
+	git --git-dir='' ls-remote --exit-code --heads "$remote" > "$workdir/output" 2>&1 || {
+		rc="$?"
+		if [ "$rc" != 2 ]; then
+			log '#%s failed to get remote heads' "$NUM"
+			log '#%s command failed (rc=%s): %s' "$NUM" "$rc" "git --git-dir='' ls-remote --heads '$remote'"
+			cat "$workdir/output"
+			exit 1
+		fi
+	}
+
+	cut -f2 "$workdir/output" > "$remote_heads"
+fi
+
+if [ ! -e "$remote_tags"  ]; then
+	git --git-dir='' ls-remote --exit-code --tags "$remote" > "$workdir/output" 2>&1 || {
+		rc="$?"
+		if [ "$rc" != 2 ]; then
+			log '#%s failed to get remote tags' "$NUM"
+			log '#%s command failed (rc=%s): %s' "$NUM" "$rc" "git --git-dir='' ls-remote --tags '$remote'"
+			cat "$workdir/output"
+			exit 1
+		fi
+	}
+
+	sed -n \
+		-e '/^.*\^{}$/d' \
+		-e 's/^[^[:space:]]\+[[:space:]]\(.*\)$/\1/p' \
+	"$workdir/output" > "$remote_tags"
+fi
+
+sort -uo "$remote_heads" "$remote_heads"
+sort -uo "$remote_tags" "$remote_tags"
+
+local_heads="$workdir/local.heads"
+local_tags="$workdir/local.tags"
+
+:> "$local_heads"
+:> "$local_tags"
+
+log '#%s gets local heads and tags whose commits are reachable from heads' "$NUM"
+
+repo_gitdir=
+for repotype in gears srpms; do
+	gitdir="$ARCHIVEDIR/$repotype/$prefix/$REPO"
+
+	[ -d "$gitdir" ] ||
+		continue
+
+	[ -n "$repo_gitdir" ] ||
+		repo_gitdir="$gitdir"
+
+	git --git-dir="$gitdir" rev-parse --symbolic-full-name --branches='*' |
+	while read -r head; do
+		is_valid_head "$head" ||
+			continue
+
+		target="${head#refs/heads/}"
+
+		printf '%s\t%s\t%s\n' "refs/heads/repository/$repotype/$target" "$head" "$gitdir"
+
+		git --git-dir="$gitdir" tag --list --merged "$head" |
+			sed -e 's,^.*$,refs/tags/&,' |
+		while read -r tag; do
+			is_valid_tag "$tag" ||
+				continue
+
+			printf '%s\t%s\n' "$tag" "$gitdir"
+
+		done >> "$local_tags"
+	done >> "$local_heads"
+done
+
+sort -k1,1 -uo "$local_heads" "$local_heads"
+sort -k1,1 -uo "$local_tags" "$local_tags"
+
+join -v2 -j1 "$local_tags" "$remote_tags"  > "$workdir/output"
+
+while read -r orphaned_tag; do
+	log '#%s deleting orphaned tag %s' "$NUM" "$orphaned_tag"
+
+	git_push "$repo_gitdir" "" "$orphaned_tag" || {
+		log '#%s tags deletion failed' "$NUM"
+		exit 1
+	}
+done < "$workdir/output"
+
+join -v2 -j1 "$remote_tags" "$local_tags" > "$workdir/output"
+
+while read -r new_tag gitdir; do
+	if [ "${prev_gitdir-}" != "$gitdir" ]; then
+		log '#%s uploading tags from %s' "$NUM" "$gitdir"
+		prev_gitdir="$gitdir"
+	fi
+
+	log '#%s uploading tag %s' "$NUM" "$new_tag"
+
+	git_push "$gitdir" "$new_tag" "$new_tag" || {
+		log '#%s tags push failed' "$NUM"
+		exit 1
+	}
+done < "$workdir/output"
+
+join -v2 -j1 "$local_heads" "$remote_heads" > "$workdir/output"
+
+while read -r orphaned_head; do
+	log '#%s deleting orphaned head %s' "$NUM" "$orphaned_head"
+	git_push "$repo_gitdir" "" "$orphaned_head" || {
+		log '#%s heads deletion failed' "$NUM"
+		exit 1
+	}
+done < "$workdir/output"
+
+join -v2 -j1 "$remote_heads" "$local_heads" > "$workdir/output"
+
+local_sisyphus='refs/heads/sisyphus'
+
+prev_gitdir=
+while read -r new_head local_head gitdir; do
+	[ "$local_head" = "$local_sisyphus" ] ||
+		continue
+
+	if [ "${prev_gitdir-}" != "$gitdir" ]; then
+		log '#%s uploading heads from %s' "$NUM" "$gitdir"
+		prev_gitdir="$gitdir"
+	fi
+
+	log '#%s uploading head %s -> %s' "$NUM" "$local_head" "$new_head"
+
+	git_push "$gitdir" "$local_head" "$new_head" || {
+		log '#%s heads push failed' "$NUM"
+		exit 1
+	}
+done < "$workdir/output"
+
+prev_gitdir=
+while read -r new_head local_head gitdir; do
+	[ "$local_head" != "$local_sisyphus" ] ||
+		continue
+
+	if [ "${prev_gitdir-}" != "$gitdir" ]; then
+		log '#%s uploading heads from %s' "$NUM" "$gitdir"
+		prev_gitdir="$gitdir"
+	fi
+
+	log '#%s uploading head %s -> %s' "$NUM" "$local_head" "$new_head"
+
+	git_push "$gitdir" "$local_head" "$new_head" || {
+		log '#%s heads push failed' "$NUM"
+		exit 1
+	}
+done < "$workdir/output"

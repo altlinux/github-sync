@@ -1,10 +1,11 @@
-#!/bin/sh -fu
+#!/bin/sh -efu
 
 cwd="$(readlink -ev "$0")"
 cwd="${0%/*}"
 
 . "$cwd/charon-sh-config"
 . "$cwd/charon-sh-functions"
+. "$cwd/charon-sh-github-functions"
 
 [ -f "$GITHUB_TOKEN" ] ||
 	fatal "github token required"

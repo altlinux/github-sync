@@ -1,112 +1,36 @@
-#!/bin/sh -fu
+#!/bin/sh -efu
 
 cwd="$(readlink -ev "$0")"
 cwd="${0%/*}"
 
 . "$cwd/charon-sh-config"
 . "$cwd/charon-sh-functions"
-
-github_http_status()
-{
-	sed -n \
-		-e '1,1{ s,HTTP/[^[:space:]]\+ \([0-9]\+\) .*,\1,p }' \
-		"$TEMPDIR/github-headers"
-}
-
-github_api_get()
-{
-	github_status=
-	curl -s \
-		-H "@$GITHUB_TOKEN" \
-		-H 'Accept: application/vnd.github.v3+json' \
-		-X GET \
-		-D "$TEMPDIR/github-headers" \
-		-o "$TEMPDIR/github-body" \
-		"$GITHUB_URL$1"
-
-	github_http_status
-}
-
-__github_api_method()
-{
-	curl -s \
-		-H "@$GITHUB_TOKEN" \
-		-H 'Accept: application/vnd.github.v3+json' \
-		-H 'Accept: application/vnd.github.mercy-preview+json' \
-		-X "$1" \
-		-d "@-" \
-		-D "$TEMPDIR/github-headers" \
-		-o "$TEMPDIR/github-body" \
-		"$GITHUB_URL$2"
-
-	github_http_status
-}
-
-
-github_api_post()
-{
-	__github_api_method POST "$1"
-}
-
-github_api_put()
-{
-	__github_api_method PUT "$1"
-}
-
-github_error()
-{
-	printf 'GITHUB HTTP error: status=%s\n' "$status"
-	printf 'URL: %s\n' "$1"
-	cat "$TEMPDIR/github-body"
-}
-
-# https://developer.github.com/v3/#rate-limiting
-# https://developer.github.com/v3/rate_limit/
-github_rate_limit()
-{
-	local status
-
-	status="$(github_api_get /rate_limit)"
-	if [ "$status" != 200 ]; then
-		github_error '/rate_limit'
-		exit 1
-	fi
-
-	limit_remaining="$(jq .resources.core.remaining "$TEMPDIR/github-body")"
-	limit_reset="$(jq .resources.core.reset "$TEMPDIR/github-body")"
-}
+. "$cwd/charon-sh-github-functions"
 
 if [ ! -f "$GITHUB_TOKEN" ]; then
 	log "GITHUB token required"
 	exit 1
 fi
 
-MANIFEST="$1"; shift
+newcomers="$1"; shift
+
+[ -f "$DATADIR/github-created" ] || :> "$DATADIR/github-created"
 
 sort -u -o "$DATADIR/github-created" "$DATADIR/github-created"
-
-if [ -f "$DATADIR/whitelist" ]; then
-	log 'use whitelist'
-	sort -u -o "$DATADIR/whitelist" "$DATADIR/whitelist"
-	sort -u -k1,1 "$MANIFEST" |
-		join -t '	' -j1 -a1 "$DATADIR/whitelist" - > "$TEMPDIR/$PROG.repos"
-else
-	sort -u -k1,1 "$MANIFEST" > "$TEMPDIR/$PROG.repos"
-fi
-
-join -t '	' -j1 -v2 "$DATADIR/github-created" "$TEMPDIR/$PROG.repos" > "$TEMPDIR/$PROG.repos-not-created"
+join -t '	' -j1 -v2 -o 2.1 "$DATADIR/github-created" "$newcomers" > "$TEMPDIR/$PROG.repos-not-created"
 
 if [ ! -s "$TEMPDIR/$PROG.repos-not-created" ]; then
 	log 'nothing to do'
 	exit 0
 fi
 
-log 'need to create %s repositories' "$(wc -l < "$TEMPDIR/$PROG.repos-not-created")"
+log 'is going to create %s repositories' "$(wc -l < "$TEMPDIR/$PROG.repos-not-created")"
+:> "$TEMPDIR/$PROG.repos-failed"
 
 github_rate_limit
 
 rc=0
-while IFS='	' read -r repo _ _ gitdir; do
+while IFS='	' read -r repo; do
 	while [ "$limit_remaining" -le 0 ]; do
 		log 'GITHUB rate limit reached. The time at which the current rate limit window resets in %s' "$(date -u --date="@$limit_reset")"
 
@@ -124,56 +48,96 @@ while IFS='	' read -r repo _ _ gitdir; do
 	done
 
 	name="${repo%.git}"
+	github_reponame github_name "$name"
 
-	log 'creating %s GITHUB repository' "$name"
+	info=
+	[ "$github_name" = "$name" ] ||
+		info=" (as $github_name)"
 
-	summary="$("$0-git-summary" "$name" "$gitdir" |sed -e "s/\"/'/g")"
+	summary="$("$cwd/charon-github-create-git-summary" "$name" |sed -e "s/\"/'/g")"
 
-	url="/orgs/altlinux-packages/repos"
-	status=$(github_api_post "$url" <<-EOF
-		{
-		    "name": "$name",
-		    "description": "$summary",
-		    "homepage": "https://packages.altlinux.org/en/Sisyphus/srpms/$name",
-		    "private": false,
-		    "has_issues": false,
-		    "has_projects": false,
-		    "has_wiki": false,
-		    "allow_squash_merge": false,
-		    "allow_rebase_merge": false
-		}
-		EOF
-	)
+	for i in 1 2 3; do
+		url="/orgs/$GITHUB_ORG/repos"
+		status=$(github_api_post "$url" <<-EOF
+			{
+			    "name": "$github_name",
+			    "description": "$summary",
+			    "homepage": "https://packages.altlinux.org/en/Sisyphus/srpms/$name",
+			    "private": false,
+			    "has_issues": false,
+			    "has_projects": false,
+			    "has_wiki": false,
+			    "allow_squash_merge": false,
+			    "allow_rebase_merge": false
+			}
+			EOF
+		)
 
-	limit_remaining=$(($limit_remaining - 1))
+		limit_remaining=$(github_limit_remaining)
+
+		[ "$status" = 500 ] ||
+			break
+
+		sleep 0.5
+	done
 
 	if [ "$status" != 201 ]; then
-		github_error "$url"
-		rc=1
+		printf '%s\n' "$repo" >>"$TEMPDIR/$PROG.repos-failed-to-create"
+
+		if [ "$status" = 422 ]; then
+			log '%s found on GITHUB' "$name$info"
+			printf '%s\n' "$repo" >>"$DATADIR/github-created"
+		else
+			log 'failed to create %s on GITHUB' "$name$info"
+			github_error "$url" "POST"
+			rc=1
+		fi
+
 		continue
+	else
+		log '%s repository created' "$name$info"
 	fi
 
 	printf '%s\n' "$repo" >>"$DATADIR/github-created"
 
-	url="/repos/altlinux-packages/$name/topics"
-	status=$(github_api_put "$url" <<-EOF
-		{
-		    "names": [
-		        "altlinux",
-		        "package",
-		        "rpm"
-		    ]
-		}
-		EOF
-	)
+	for i in 1 2 3 4 5 6 7 8 9 0; do
+		[ "$limit_remaining" -gt 0 ] ||
+			break
 
-	limit_remaining=$(($limit_remaining - 1))
+		url="/repos/$GITHUB_ORG/$github_name/topics"
+		status=$(github_api_put "$url" <<-EOF
+			{
+			    "names": [
+			        "altlinux",
+			        "package",
+			        "rpm"
+			    ]
+			}
+			EOF
+		)
+
+		limit_remaining=$(github_limit_remaining)
+
+		[ "$status" = 404 ] ||
+			break
+
+		sleep 0.5
+	done
 
 	if [ "$status" != 200 ]; then
-		github_error "$url"
+		github_error "$url" "PUT"
 		rc=1
 	fi
 
+	sleep 0.5
+
 done < "$TEMPDIR/$PROG.repos-not-created"
+
+if [ -s "$TEMPDIR/$PROG.repos-failed-to-create" ]; then
+	sort -u -o "$TEMPDIR/$PROG.repos-failed-to-create" "$TEMPDIR/$PROG.repos-failed-to-create"
+	join -t '	' -j1 -v2 -o 2.1,2.2 \
+		"$TEMPDIR/$PROG.repos-failed-to-create" "$newcomers" >"$TEMPDIR/$PROG.output"
+	mv -f -- "$TEMPDIR/$PROG.output" "$newcomers"
+fi
 
 exit $rc

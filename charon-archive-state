@@ -9,28 +9,51 @@ cwd="${0%/*}"
 . "$cwd/charon-sh-config"
 . "$cwd/charon-sh-functions"
 
+_sort()
+{
+	if [ "$2" '=' "$3" ]; then
+		printf '%s\t%s\n' "$1" "$3"
+	elif [ "$2" '<' "$3" ]; then
+		printf '%s\t%s\n' "$1" "$3"
+	else
+		printf '%s\t%s\n' "$1" "$2"
+	fi
+}
+
 [ -f "$old_state" ] || :> "$old_state"
 [ -f "$cur_state" ] || :> "$cur_state"
 
-log "update state"
+log 'update state'
 
-find \
-	"$ARCHIVEDIR/srpms" \
-	-mindepth 2 -maxdepth 2 -type d -name '*.git' \
-	-printf '%f\t%T+\t1\t%p\n' > "$TEMPDIR/state.srpms" &
+export LANG=C
 
-find \
-	"$ARCHIVEDIR/gears" \
-	-mindepth 2 -maxdepth 2 -type d -name '*.git' \
-	-printf '%f\t%T+\t2\t%p\n' > "$TEMPDIR/state.gears" &
+{
+	find \
+		"$ARCHIVEDIR/srpms" \
+		-mindepth 2 -maxdepth 2 -type d -name '*.git' \
+		-printf '%f\t%T+\n' > "$TEMPDIR/state.srpms"
+
+	sort -o "$TEMPDIR/state.srpms" "$TEMPDIR/state.srpms"
+} &
+
+{
+	find \
+		"$ARCHIVEDIR/gears" \
+		-mindepth 2 -maxdepth 2 -type d -name '*.git' \
+		-printf '%f\t%T+\n' > "$TEMPDIR/state.gears"
+
+	sort -o "$TEMPDIR/state.gears" "$TEMPDIR/state.gears"
+} &
 
 wait
 
-sort -k1,3 -r \
-	-o "$cur_state" \
-	"$TEMPDIR/state.gears" \
-	"$TEMPDIR/state.srpms"
+join -t '	' -j1 -a1 -a2 "$TEMPDIR/state.srpms" "$TEMPDIR/state.gears" |
+while IFS='	' read -r n a b; do
+	_sort "$n" "${a:-0000-00-00+00:00:00.0000000000}" "${b:-0000-00-00+00:00:00.0000000000}"
+done |
+	sort -k1,1 -o "$cur_state"
 
 find "$STATEDIR" -type f -name 'state' -exec cat '{}' '+' |
-	sort -k1,3 -r \
-	-o "$old_state"
+	sort -k1,1 -o "$old_state"
+
+log 'done'

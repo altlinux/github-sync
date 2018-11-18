@@ -1,10 +1,86 @@
 #!/bin/sh
 
 . shell-error
+. shell-string
 
 log()
 {
 	printf '%s] %s ' "$(date +'%Y-%m-%d %H:%M:%S.%N')" "$PROG"
 	printf -- "$@"
 	printf '\n'
+}
+
+is_valid_head()
+{
+	local head="$1"
+
+	case ""${head#refs/heads/}"" in
+		*/*|[45].[0-9]|c6*|c7*|c8*|p5)
+			return 1
+			;;
+	esac
+}
+
+is_valid_tag()
+{
+	local tag="$1"
+
+	case "${tag#refs/tags/}" in
+		*-alt[0-9]*)
+			;;
+		*)
+			return 1
+			;;
+	esac
+}
+
+limit_newcomers()
+{
+	if [ -n "$1" ]; then
+		head --lines="$1"
+	else
+		cat
+	fi
+}
+
+github_reponame()
+{
+	local v="$1"; shift
+	local l="$1"; shift
+
+	local m= r= c=
+
+	fill_mask m "$l"
+
+	while [ -n "$l" ]; do
+		c="${l%$m}"
+		l="${l#?}"
+		m="${m#?}"
+
+		case "$c" in
+			+)
+				r="${r}_plus_"
+				;;
+			*)
+				r="${r}$c"
+				;;
+		esac
+	done
+
+	eval "$v=\"\$r\""
+}
+
+repo_statedir()
+{
+	local rval="$1"; shift
+	local repo="$1"; shift
+
+	local digest suffix subdir
+
+	digest="$(printf '%s' "$repo" | sha256sum)"
+	digest="${digest%% *}"
+	suffix="${digest#??}"
+	subdir="${digest%$suffix}/$digest"
+
+	eval "$rval=\"\$STATEDIR/\$subdir\""
 }

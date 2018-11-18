@@ -11,77 +11,97 @@ cwd="${0%/*}"
 
 exit_handler()
 {
+	#return
 	[ ! -d "$TEMPDIR" ] ||
 		find "$TEMPDIR" -mindepth 1 -maxdepth 1 |
 			xargs -r rm -rf --
-	exit "$1"
 }
 
 [ -f "$GITHUB_TOKEN" ] ||
 	fatal "github token required"
 
 [ -d "$TEMPDIR"   ] || mkdir -p -- "$TEMPDIR"
-[ -d "$LOCKDIR"   ] || mkdir -p -- "$LOCKDIR"
 [ -d "$LOGDIR"    ] || mkdir -p -- "$LOGDIR"
 [ -d "$STATEDIR"  ] || mkdir -p -- "$STATEDIR"
 
-exec >>"$LOGDIR/$PROG.log" 2>&1
-
 set_cleanup_handler exit_handler
 
-"$0-archive-state"
+if ! "$cwd/charon-archive-state" >> "$LOGDIR/charon-archive-state.log" 2>&1; then
+	log 'unable to get new archive state'
+	exit 1
+fi
 
 log 'comparing changed repositories'
 
-MANIFEST="$TEMPDIR/$PROG.repos-updated"
+newcomers="$TEMPDIR/$PROG.repos-updated"
 diff \
 	--new-line-format='%l
 ' \
 	--old-line-format='' \
 	--unchanged-line-format='' \
-	-- "$old_state" "$cur_state" > "$MANIFEST" ||:
+	-- \
+		"$old_state" \
+		"$cur_state" |
+	sort -k1,1 -o "$newcomers"
 
-if [ ! -s "$MANIFEST" ]; then
-	log "nothing to do"
+log 'found %s newcomers' "$(wc -l < "$newcomers")"
+
+log 'asking cerberus to get rid of bad repositories'
+
+if ! "$cwd/cerberus" "$newcomers" >> "$LOGDIR/cerberus.log" 2>&1; then
+	log 'cannot continue as the cerberus failed'
+	exit 1
+fi
+
+if [ ! -s "$newcomers" ]; then
+	log 'has nothing to do'
 	exit 0
 fi
 
-log 'push changes in %s repositories' "$(cut -f1 "$MANIFEST" | sort -u | wc -l)"
+log 'is going to transport %s repositories to the other side using %s boats' "$(wc -l < "$newcomers")" "$MAX_BOATS"
 
-"$0-github-create" "$MANIFEST"
+if ! "$cwd/charon-github-create" "$newcomers" >> "$LOGDIR/charon-github-create.log" 2>&1; then
+	log 'unable to create repositories on the other side'
+	exit 1
+fi
 
-i=0
-while [ "$i" -lt "$MAX_PUSHERS" ]; do
+[ -z "$CHARON_ONLY_CREATE_REPOSITORIES" ] ||
+	exit 0
+
+num=0
+while [ "$num" -lt "$MAX_BOATS" ]; do
+	log 'launches boat number %s ...' "$num"
 	{
-		while IFS='	' read -r repo mtime rtype gitdir; do
-			[ -d "$LOCKDIR" ] ||
-				exit 0
+		i=0
+		while IFS='	' read -r repo state; do
+			i=$(($i + 1))
 
-			if [ -f "$DATADIR/whitelist" ]; then
-				grep -F -m 1 -xqs "$repo" "$DATADIR/whitelist" ||
-					continue
-			fi
-
-			grep -F -m 1 -xqs "$repo" "$DATADIR/github-created" ||
+			[ "$(($i % $MAX_BOATS))" = "$num" ] ||
 				continue
 
-			if ! mkdir -- "$LOCKDIR/$repo" >/dev/null 2>&1; then
-				[ -s "$LOCKDIR/$repo/pusher" ] &&
-					read num < "$LOCKDIR/$repo/pusher" &&
-					[ "$num" = "$i" ] ||
-					continue
+			log 'invites %s to get into the boat #%s ...' "$repo" "$num"
+
+			if ! "$cwd/charon-boat" "$num" "$repo"; then
+				log 'failed to process %s on boat %s' "$repo" "$num"
+				:>"$TEMPDIR/failed"
+				continue
+			else
+				log 'successfully transported %s on boat %s' "$repo" "$num"
 			fi
-			printf '%s\n' "$i" > "$LOCKDIR/$repo/pusher"
 
-			"$0-pusher" "$i" "$repo" "$mtime" "$rtype" "$gitdir"
+			repo_statedir "statedir" "$repo"
+			mkdir -p -- "$statedir"
 
-		done < "$MANIFEST"
+			printf '%s\t%s\n' "$repo" "$state" > "$statedir/state"
 
-	} >"$LOGDIR/$PROG.$i.log" 2>&1 &
+		done < "$newcomers"
 
-	i=$(($i + 1))
+	} >>"$LOGDIR/$PROG.boat.$num.log" 2>&1 &
+
+	num=$(($num + 1))
 done
 
+log 'awaits the completion of the journey'
 wait
 
 rc=0

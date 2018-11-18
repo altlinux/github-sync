@@ -1,20 +1,26 @@
 #!/bin/sh
 
-MAX_PUSHERS=10
+export LANG=C
+
+MAX_BOATS=3
 
 ARCHIVEDIR='/archive_git'
-BASEDIR='/home/legion/github-sync'
+BASEDIR="$HOME/github-sync"
 
 TEMPDIR="$BASEDIR/tmp"
 DATADIR="$BASEDIR/data"
+ETCDIR="$BASEDIR/etc"
 LOGDIR="$BASEDIR/logs"
-LOCKDIR="$TEMPDIR/locks"
 STATEDIR="$DATADIR/state"
 
 old_state="$DATADIR/repos.prv"
 cur_state="$DATADIR/repos.cur"
 
+cerberus_rules="$ETCDIR/cerberus.rules"
+
+GITHUB_TOKEN="$ETCDIR/github-token"
 GITHUB_URL='https://api.github.com'
 GITHUB_ORG='alt-packages'
 
-GITHUB_TOKEN="$BASEDIR/data/github-token"
+CHARON_ONLY_CREATE_REPOSITORIES=
+LIMIT_NEWCOMERS=10

@@ -2,24 +2,42 @@
 
 . gear-sh-functions
 
-name="$1"; shift
+cwd="$(readlink -ev "$0")"
+cwd="${0%/*}"
 
-export LANG=C
-export GIT_DIR="$1"
+. "$cwd/charon-sh-config"
+
+REPO="$1"; shift
+
+suffix="${REPO#?}"
+prefix="${REPO%$suffix}"
 
 workdir="${TEMPDIR:-/tmp}"
 main_tree_id='HEAD'
 
-find_specfile
+for repotype in gears srpms; do
+	export GIT_DIR="$ARCHIVEDIR/$repotype/$prefix/$REPO.git"
 
-rpmquery \
-	--qf='%{name}\t%{summary}\n' \
-	--specfile "$workdir/specfile" 2>/dev/null |
-while IFS='	' read -r pkg summary; do
-	[ "$pkg" != "$name" ] ||
-		printf '%s\n' "$summary"
+	[ -d "$GIT_DIR" ] ||
+		continue
+
+	if ! git cat-file -t HEAD >/dev/null 2>&1; then
+		main_tree_id="$(git rev-parse --symbolic-full-name --branches='*' |head -1)"
+	fi
+
+	find_specfile
+
+	rpmquery \
+		--qf='%{name}\t%{summary}\n' \
+		--specfile "$workdir/specfile" 2>/dev/null |
+	while IFS='	' read -r name summary; do
+		[ "$name" != "$REPO" ] ||
+			printf '%s\n' "$summary"
+	done
+
+	rm -f -- \
+		"$workdir/rules" \
+		"$workdir/specfile"
+
+	exit 0
 done
-
-rm -f -- \
-	"$workdir/rules" \
-	"$workdir/specfile"

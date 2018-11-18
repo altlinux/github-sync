@@ -1,0 +1,87 @@
+/^alt-packages.github.io\.git[[:space:]]/d
+/^ants\.git[[:space:]]/d
+/^adobe-flash-player\.git[[:space:]]/d
+/^chromium-(browser|stable)\.git[[:space:]]/d
+/^clipart-.*\.git[[:space:]]/d
+/^cliparts-putler\.git[[:space:]]/d
+/^firefox-(3\.6|4\.0|5\.0)\.git[[:space:]]/d
+/^firefox-yandexbar\.git[[:space:]]/d
+/^firmware-.*\.git[[:space:]]/d
+/^golang-.*\.git[[:space:]]/d
+/^kernel-image-.*\.git[[:space:]]/{
+	/^kernel-image-std-def\.git[[:space:]]/p
+	d
+}
+/^kernel-modules-.*\.git[[:space:]]/{
+	/^kernel-modules-.*-std-def\.git[[:space:]]/p
+	d
+}
+/^kernel-(source|src)-nvidia.*\.git[[:space:]]/d
+/^LibreOff.ce4-extension-CyrillicTools\.git[[:space:]]/d
+/^LibreOffice4\.git[[:space:]]/d
+/^make3\.82\.git[[:space:]]/d
+/^make-initrd2.*\.git[[:space:]]/d
+/^mozilla/{
+	/^mozilla-common\.git[[:space:]]/p
+	/^mozilla-plugin-.*/p
+	d
+}
+/^nvidia_glx_.*\.git[[:space:]]/d
+/^opera64-dev\.git[[:space:]]/d
+/^opera-dev\.git[[:space:]]/d
+/^opera\.git[[:space:]]/d
+/^util-linux-ng\.git[[:space:]]/d
+/^XFree86.*\.git[[:space:]]/d
+/^xulrunner.*\.git[[:space:]]/d
+/^i386-mingw32msvc.*\.git[[:space:]]/d
+/^kernel-complete-.*\.git[[:space:]]/d
+/^kernel-(feat|fix)-.*\.git[[:space:]]/d
+/^kernel-(source|src)-.*\.git[[:space:]]/d
+/^wallpapers-.*\.git[[:space:]]/d
+/^wallpapoz\.git[[:space:]]/d
+
+# remote: error: GH001: Large files detected. You may want to try Git Large File Storage - https://git-lfs.github.com.        
+# remote: error: Trace: 798261a21e913e9a25b0108de561e350        
+# remote: error: See http://git.io/iEPt8g for more information.        
+# remote: error: File 0ad-data/binaries/data/mods/public/public.zip is 844.61 MB; this exceeds GitHub's file size limit of 100.00 MB        
+/^0ad-data\.git[[:space:]]/d
+
+# remote: error: object b5a0d078d2291174e3240b87c5da83529f9a6b70: missingSpaceBeforeDate: invalid author/committer line - missing space before date        
+# remote: fatal: fsck error in packed object        
+/^alterator-packages\.git[[:space:]]/d
+
+# remote: error: object 04d800c93ba109a4334833d04d6317278f70dfdf: badEmail: invalid author/committer line - bad email        
+/^archiveopteryx\.git[[:space:]]/d
+
+# remote: warning: File libreoffice/sdext/source/pdfimport/xpdftest/binary_1_out.def is 71.68 MB; this is larger than GitHub's recommended maximum file size of 50.00 MB        
+# remote: error: GH001: Large files detected. You may want to try Git Large File Storage - https://git-lfs.github.com.        
+# remote: error: Trace: e98b5be4db8c73a618fff6bb29e40628        
+# remote: error: See http://git.io/iEPt8g for more information.        
+# remote: error: File libreoffice/ChangeLog is 101.31 MB; this exceeds GitHub's file size limit of 100.00 MB        
+/^LibreOffice\.git[[:space:]]/d
+
+# remote: warning: File libreoffice/sdext/source/pdfimport/xpdftest/binary_1_out.def is 71.68 MB; this is larger than GitHub's recommended maximum file size of 50.00 MB        
+# remote: error: GH001: Large files detected. You may want to try Git Large File Storage - https://git-lfs.github.com.        
+# remote: error: Trace: 8772d7d217daeff625f7f4eb21797714        
+# remote: error: See http://git.io/iEPt8g for more information.        
+# remote: error: File libreoffice/ChangeLog is 104.04 MB; this exceeds GitHub's file size limit of 100.00 MB        
+/^LibreOffice-still\.git[[:space:]]/d
+
+# remote: warning: File Data/WindBladeReader/field/comp.out.10 is 61.52 MB; this is larger than GitHub's recommended maximum file size of 50.00 MB        
+# remote: warning: File Data/WindBladeReader/field/comp.out.5500 is 61.52 MB; this is larger than GitHub's recommended maximum file size of 50.00 MB        
+# remote: error: GH001: Large files detected. You may want to try Git Large File Storage - https://git-lfs.github.com.
+# remote: error: Trace: f11555a1dcd6a08a413762d9a9471ba7        
+# remote: error: See http://git.io/iEPt8g for more information.        
+# remote: error: File Data/NetCDF/test.pop.nc is 100.79 MB; this exceeds GitHub's file size limit of 100.00 MB        
+/^VTKLargeData\.git[[:space:]]/d
+
+# remote: error: object 2eacf3fb10e8a337335b1d3f613bd64accf8abad: missingNameBeforeEmail: invalid author/committer line - missing space before email        
+# remote: fatal: fsck error in packed object        
+/^bzr\.git[[:space:]]/d
+
+# remote: warning: File chromium/src/chrome/tools/test/reference_build/chrome_linux/chrome is 88.87 MB; this is larger than GitHub's recommended maximum file size of 50.00 MB        
+# remote: error: GH001: Large files detected. You may want to try Git Large File Storage - https://git-lfs.github.com.        
+# remote: error: Trace: 1a9cb713193af9df35414a46624a389d        
+# remote: error: See http://git.io/iEPt8g for more information.        
+# remote: error: File chromium/src/chrome/tools/test/reference_build/chrome_linux/nacl_helper is 102.94 MB; this exceeds GitHub's file size limit of 100.00 MB        
+/^chromium\.git[[:space:]]/d

@@ -1,0 +1,22 @@
+#!/bin/sh -efu
+
+exit
+
+. shell-signal
+
+cwd="$(readlink -ev "$0")"
+cwd="${0%/*}"
+
+. "$cwd/charon-sh-config"
+
+exit_handler()
+{
+	[ ! -d "$0.lock" ] || rm -rf -- "$0.lock"
+}
+
+mkdir "$0.lock" >/dev/null 2>&1 ||
+	exit 0
+
+set_cleanup_handler exit_handler
+
+"$cwd"/charon >> "$LOGDIR"/charon.log
