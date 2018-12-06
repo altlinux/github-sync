@@ -79,18 +79,15 @@ while [ "$num" -lt "$MAX_BOATS" ]; do
 			[ "$(($i % $MAX_BOATS))" = "$num" ] ||
 				continue
 
-			log 'invites %s to get into the boat #%s ...' "$repo" "$num"
-
 			if ! "$cwd/charon-boat" "$num" "$repo"; then
-				log 'failed to process %s on boat %s' "$repo" "$num"
+				log 'failed to process %s on boat #%s' "$repo" "$num"
 				:>"$TEMPDIR/failed"
 				continue
 			else
-				log 'successfully transported %s on boat %s' "$repo" "$num"
+				log 'successfully transported %s on boat #%s' "$repo" "$num"
 			fi
 
 			repo_statedir "statedir" "$repo"
-			mkdir -p -- "$statedir"
 
 			printf '%s\t%s\n' "$repo" "$state" > "$statedir/state"
 

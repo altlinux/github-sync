@@ -3,8 +3,6 @@
 . shell-error
 . shell-signal
 
-TEST=
-
 cwd="$(readlink -ev "$0")"
 cwd="${0%/*}"
 
@@ -29,30 +27,46 @@ exit_handler()
 	[ -z "$workdir" ] || rm -rf -- "$workdir"
 }
 
+git_push_error_large_file_fatal=
 git_push()
 {
 	local rc=0
 
+	local typ="$1"; shift
 	local dir="$1"; shift
 	local src="$1"; shift
 	local dst="$1"; shift
 
-	$TEST git --git-dir="$dir" push -q "$remote" "$src:$dst" >"$workdir/git-push.output" 2>&1 || rc=$?
+	git --git-dir="$dir" push -q "$remote" "$src:$dst" >"$workdir/git-push.output" 2>&1 || rc=$?
+
 	if [ "$rc" != 0 ]; then
-		if grep -qs -e 'remote: error: ' "$workdir/git-push.output"; then
+		if grep -qs -e '^remote: error: GH001: Large files detected' "$workdir/git-push.output"; then
+			[ -n "$git_push_error_large_file_fatal" ] ||
+				rc=0
+		fi
+
+		if [ "$rc" != 0 ]; && grep -qsE -e '^remote: (error|fatal): ' "$workdir/git-push.output"; then
+			[ -z "$src" ] ||
+				printf '%s\n' "$src" >> "$statedir/$typ.blacklist"
 			{
 				printf '\n'
 				sed -n -e 's/^remote: /# &/p' "$workdir/git-push.output"
 				printf '/^%s\.git[[:space:]]/d\n' "$reponame"
 			} >> "$cerberus_rules"
 		fi
+
 		cat "$workdir/git-push.output"
 	fi
+
 	return $rc
 }
 
+log '#%s invites %s to get into the boat ...' "$NUM" "$REPO"
+
 workdir="$(mktemp -d "$TEMPDIR/$PROG.XXXXXXXXX")"
 set_cleanup_handler exit_handler
+
+repo_statedir "statedir" "$REPO"
 
 remote_heads="$workdir/remote.heads"
 remote_tags="$workdir/remote.tags"
@@ -106,12 +120,15 @@ for repotype in gears srpms; do
 	[ -d "$gitdir" ] ||
 		continue
 
+	is_valid_repotype "$statedir" "$repotype" ||
+		continue
+
 	[ -n "$repo_gitdir" ] ||
 		repo_gitdir="$gitdir"
 
 	git --git-dir="$gitdir" rev-parse --symbolic-full-name --branches='*' |
 	while read -r head; do
-		is_valid_head "$head" ||
+		is_valid_head "$statedir" "$head" ||
 			continue
 
 		target="${head#refs/heads/}"
@@ -121,7 +138,7 @@ for repotype in gears srpms; do
 		git --git-dir="$gitdir" tag --list --merged "$head" |
 			sed -e 's,^.*$,refs/tags/&,' |
 		while read -r tag; do
-			is_valid_tag "$tag" ||
+			is_valid_tag "$statedir" "$tag" ||
 				continue
 
 			printf '%s\t%s\n' "$tag" "$gitdir"
@@ -133,12 +150,16 @@ done
 sort -k1,1 -uo "$local_heads" "$local_heads"
 sort -k1,1 -uo "$local_tags" "$local_tags"
 
+# I hope that if large files are present in the tags, then
+# they can disappear between releases.
+git_push_error_large_file_fatal=
+
 join -v2 -j1 "$local_tags" "$remote_tags"  > "$workdir/output"
 
 while read -r orphaned_tag; do
 	log '#%s deleting orphaned tag %s' "$NUM" "$orphaned_tag"
 
-	git_push "$repo_gitdir" "" "$orphaned_tag" || {
+	git_push "tags" "$repo_gitdir" "" "$orphaned_tag" || {
 		log '#%s tags deletion failed' "$NUM"
 		exit 1
 	}
@@ -154,7 +175,7 @@ while read -r new_tag gitdir; do
 
 	log '#%s uploading tag %s' "$NUM" "$new_tag"
 
-	git_push "$gitdir" "$new_tag" "$new_tag" || {
+	git_push "tags" "$gitdir" "$new_tag" "$new_tag" || {
 		log '#%s tags push failed' "$NUM"
 		exit 1
 	}
@@ -164,11 +185,13 @@ join -v2 -j1 "$local_heads" "$remote_heads" > "$workdir/output"
 
 while read -r orphaned_head; do
 	log '#%s deleting orphaned head %s' "$NUM" "$orphaned_head"
-	git_push "$repo_gitdir" "" "$orphaned_head" || {
+	git_push "heads" "$repo_gitdir" "" "$orphaned_head" || {
 		log '#%s heads deletion failed' "$NUM"
 		exit 1
 	}
 done < "$workdir/output"
+
+git_push_error_large_file_fatal=1
 
 join -v2 -j1 "$remote_heads" "$local_heads" > "$workdir/output"
 
@@ -186,7 +209,7 @@ while read -r new_head local_head gitdir; do
 
 	log '#%s uploading head %s -> %s' "$NUM" "$local_head" "$new_head"
 
-	git_push "$gitdir" "$local_head" "$new_head" || {
+	git_push "heads" "$gitdir" "$local_head" "$new_head" || {
 		log '#%s heads push failed' "$NUM"
 		exit 1
 	}
@@ -204,7 +227,7 @@ while read -r new_head local_head gitdir; do
 
 	log '#%s uploading head %s -> %s' "$NUM" "$local_head" "$new_head"
 
-	git_push "$gitdir" "$local_head" "$new_head" || {
+	git_push "heads" "$gitdir" "$local_head" "$new_head" || {
 		log '#%s heads push failed' "$NUM"
 		exit 1
 	}

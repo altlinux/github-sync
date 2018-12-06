@@ -10,20 +10,36 @@ log()
 	printf '\n'
 }
 
+is_valid_repotype()
+{
+	local statedir="$1"; shift
+	local repotype="$1"; shift
+
+	[ ! -f "$statedir/repotype.blacklist" ] ||
+		! grep -qsxF -e "$repotype" "$statedir/repotype.blacklist" ||
+		return 1
+}
+
 is_valid_head()
 {
-	local head="$1"
+	local statedir="$1"; shift
+	local head="$1"; shift
 
 	case ""${head#refs/heads/}"" in
 		*/*|[45].[0-9]|c6*|c7*|c8*|p5)
 			return 1
 			;;
 	esac
+
+	[ ! -f "$statedir/heads.blacklist" ] ||
+		! grep -qsxF -e "$head" "$statedir/heads.blacklist" ||
+		return 1
 }
 
 is_valid_tag()
 {
-	local tag="$1"
+	local statedir="$1"; shift
+	local tag="$1"; shift
 
 	case "${tag#refs/tags/}" in
 		*-alt[0-9]*)
@@ -32,6 +48,10 @@ is_valid_tag()
 			return 1
 			;;
 	esac
+
+	[ ! -f "$statedir/tags.blacklist" ] ||
+		! grep -qsxF -e "$tag" "$statedir/tags.blacklist" ||
+		return 1
 }
 
 limit_newcomers()
@@ -81,6 +101,12 @@ repo_statedir()
 	digest="${digest%% *}"
 	suffix="${digest#??}"
 	subdir="${digest%$suffix}/$digest"
+
+	[ -d "$STATEDIR/$subdir" ] ||
+		mkdir -p -- "$STATEDIR/$subdir"
+
+	[ -s "$STATEDIR/$subdir/name" ] ||
+		printf '%s\n' "$repo" > "$STATEDIR/$subdir/name"
 
 	eval "$rval=\"\$STATEDIR/\$subdir\""
 }

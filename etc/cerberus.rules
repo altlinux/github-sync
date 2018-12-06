@@ -79,9 +79,12 @@
 # remote: fatal: fsck error in packed object        
 /^bzr\.git[[:space:]]/d
 
-# remote: warning: File chromium/src/chrome/tools/test/reference_build/chrome_linux/chrome is 88.87 MB; this is larger than GitHub's recommended maximum file size of 50.00 MB        
+# remote: error: object de96335953d035f77181c1553dc0055c6edaf9d4: missingSpaceBeforeDate: invalid author/committer line - missing space before date        
+# remote: fatal: fsck error in packed object        
+/^chrooted\.git[[:space:]]/d
+
 # remote: error: GH001: Large files detected. You may want to try Git Large File Storage - https://git-lfs.github.com.        
-# remote: error: Trace: 1a9cb713193af9df35414a46624a389d        
+# remote: error: Trace: bd0d42149c1226a0be2cc1f5d1285210        
 # remote: error: See http://git.io/iEPt8g for more information.        
-# remote: error: File chromium/src/chrome/tools/test/reference_build/chrome_linux/nacl_helper is 102.94 MB; this exceeds GitHub's file size limit of 100.00 MB        
-/^chromium\.git[[:space:]]/d
+# remote: error: File main.cvd is 104.09 MB; this exceeds GitHub's file size limit of 100.00 MB        
+/^clamav-db-main\.git[[:space:]]/d

@@ -2,7 +2,7 @@
 
 export LANG=C
 
-MAX_BOATS=3
+MAX_BOATS=1
 
 ARCHIVEDIR='/archive_git'
 BASEDIR="$HOME/github-sync"

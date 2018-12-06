@@ -43,7 +43,6 @@ diff \
 		"$workdir/newcomers" |
 while read -r repo state; do
 	repo_statedir "statedir" "$repo"
-	mkdir -p -- "$statedir"
 	printf '%s\t%s\n' "$repo" "$state" > "$statedir/state"
 done
 
@@ -57,7 +56,12 @@ while read -r repo state; do
 	suffix="${repo#?}"
 	prefix="${repo%$suffix}"
 
+	repo_statedir "statedir" "$repo"
+
 	for repotype in gears srpms; do
+		is_valid_repotype "$statedir" "$repotype" ||
+			continue
+
 		gitdir="$ARCHIVEDIR/$repotype/$prefix/$repo"
 
 		[ -d "$gitdir" ] ||
@@ -65,7 +69,7 @@ while read -r repo state; do
 
 		git --git-dir="$gitdir" rev-parse --symbolic-full-name --branches='*' |
 		while read -r head; do
-			if is_valid_head "$head"; then
+			if is_valid_head "$statedir" "$head"; then
 				printf 'yes\n'
 				break
 			fi
@@ -82,10 +86,7 @@ while read -r repo state; do
 				break
 		fi
 	else
-		repo_statedir "statedir" "$repo"
-		mkdir -p -- "$statedir"
 		printf '%s\t%s\n' "$repo" "$state" > "$statedir/state"
-
 		printf '%s\n' "$repo" >> "$workdir/newcomers.without-head"
 	fi
 
